@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use this work, please cite our FG 2026 paper."
+title: "HCAT-Pain: Hierarchical Cross-Attention Transformer for Non-contact Multimodal Pain Classification"
+authors:
+  - family-names: Gupta
+    given-names: Anup Kumar
+  - family-names: Gupta
+    given-names: Puneet
+  - family-names: Dhall
+    given-names: Abhinav
+year: 2026
+repository-code: "https://github.com/AnupKumarGupta/HCAT-Pain"
+url: "https://github.com/AnupKumarGupta/HCAT-Pain"
+preferred-citation:
+  type: conference-paper
+  title: "Hierarchical Cross-Attention Transformer for Non-contact Multimodal Pain Classification using Remote Physiological Signals and Visual Features"
+  authors:
+    - family-names: Gupta
+      given-names: Anup Kumar
+    - family-names: Gupta
+      given-names: Puneet
+    - family-names: Dhall
+      given-names: Abhinav
+  conference: "IEEE International Conference on Automatic Face and Gesture Recognition"
+  year: 2026
