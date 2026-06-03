@@ -27,12 +27,12 @@ The following setup was used during development:
 
 | Component | Version / Setting |
 |-----------|-------------------|
-| Conda environment name | `HCAT-Pain` |
-| Python | `3.8` |
-| PyTorch | `1.12.1` |
-| Torchvision | `0.13.1` |
-| Torchaudio | `0.12.1` |
-| CUDA toolkit | `11.3` |
+| Conda environment name | `HCAT-Pain`       |
+| Python | `3.9`             |
+| PyTorch | `1.12.1`          |
+| Torchvision | `0.13.1`          |
+| Torchaudio | `0.12.1`          |
+| CUDA toolkit | `11.3`            |
 | OpenFace | Built from source |
 
 ---
@@ -53,7 +53,7 @@ Newer PyTorch versions may also work, but they have not been verified for this r
 Creating a separate conda environment is recommended.
 
 ```bash
-conda create -n HCAT-Pain python=3.8
+conda create -n HCAT-Pain python=3.9
 conda activate HCAT-Pain
 ```
 
@@ -69,10 +69,10 @@ The active environment should be marked with `*`.
 
 ## 4. Install PyTorch
 
-Install PyTorch, Torchvision, Torchaudio, and CUDA toolkit using the following command:
+Install PyTorch, Torchvision, and CUDA toolkit using the following command:
 
 ```bash
-conda install pytorch==1.12.1 torchvision==0.13.1 torchaudio==0.12.1 cudatoolkit=11.3 -c pytorch
+conda install pytorch==1.12.1 torchvision==0.13.1 cudatoolkit=11.3 -c pytorch
 ```
 
 This installs the PyTorch version used during development.
