@@ -3,6 +3,7 @@ import os
 import subprocess
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
+from utils import SUBJECT_LIST_TRAIN, SUBJECT_LIST_TEST, SUBJECT_LIST_VALIDATION
 
 # Limit OpenBLAS threads inherited by OpenFace subprocesses to reduce CPU/memory contention.
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -32,9 +33,9 @@ FLAGS = [
 
 ## Use this if you want the output folder to be split-wise.
 ## Add the subjects to each split accordingly. Ensure split wise subject exclusivity to prevent data-leakage
-# subject_list_train = natsorted([])
-# subject_list_val = natsorted([])
-# subject_list_test = natsorted([])
+# subject_list_train = natsorted([SUBJECT_LIST_TRAIN])
+# subject_list_val = natsorted([SUBJECT_LIST_VALIDATION])
+# subject_list_test = natsorted([SUBJECT_LIST_TEST])
 
 
 def process_video(video_path):
