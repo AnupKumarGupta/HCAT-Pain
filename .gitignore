@@ -1,0 +1,15 @@
+# -------------------------------
+# Third-party / external libraries
+# -------------------------------
+
+# Ignore contents inside each external library folder
+/libraries/*/**
+
+# Keep each external library folder visible to Git
+!/libraries/*/
+
+# Keep placeholder files
+!/libraries/*/.gitkeep
+
+# PyCharm / IntelliJ project settings
+.idea/

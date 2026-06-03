@@ -121,6 +121,13 @@ The implementation code is **not uploaded yet**. The planned release includes:
 The code will be released after cleanup, documentation, and dependency verification.
 
 ---
+
+##  Developer setup
+
+For environment creation, library installations and common setup issues, please see:
+- [Installation Guide](docs/SETUP.md)
+
+---
 ## Citation
 
 If you find this work useful, please cite:
