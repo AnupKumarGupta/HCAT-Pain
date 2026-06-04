@@ -25,6 +25,11 @@ mp_left_eye_indices = [55, 65, 52, 53, 46, 124, 31, 228, 229, 230, 231, 232, 233
 mp_right_eye_indices = [285, 295, 282, 283, 276, 353, 261, 448, 449, 450, 451, 452, 453, 464, 413]
 mp_lip_indices = [186, 92, 165, 167, 164, 57, 43, 106, 182, 83, 18, 313, 406, 335, 273, 287, 410, 322, 391, 393, 164]
 mp_forehead_indices = [54, 103, 67, 109, 10, 338, 297, 332, 284]
+mp_nose_indices = ([1, 2, 4, 5, 6, 45, 48, 64, 94, 97, 98, 115, 168, 195, 197, 220, 275, 278, 294, 326, 327, 344, 440] +
+                   [3, 19, 51, 122, 131, 134, 196, 198, 209, 236, 248, 281, 351, 360, 363, 419, 420, 429, 456])
+# Adds extra landmark indices on the edge of the nose. Increased the points for robust LM tracking
+mp_right_cheeks = [36, 50, 100, 117, 118, 119, 120, 123, 142, 187, 205]
+mp_left_cheeks = [266, 280, 329, 346, 347, 348, 349, 352, 371, 411, 425]
 
 DEFAULT_FPS = 30.0
 SKIP_SECONDS = 0.5
@@ -32,6 +37,12 @@ EXTEND_FOREHEAD = False
 DISPLAY_INTERMEDIATE_OUTPUTS = False
 USE_ADAPTIVE_BLOCK_SIZE = True
 PERCENTAGE_OF_FACE_TO_BE_USED_AS_BLOCK = 10
+USE_SKIN_SEGMENTATION = False
+MAX_LANDMARK_START_FRAME = 10
+INCLUDE_CHEEK_LMS_FOR_LAGRANGIAN = True
+MIN_LAGRANGIAN_POINTS = 20
+# We searched empirically and qualitatively and came up the config values. Tweaking further may be done by users
+LK_PARAMS = dict(winSize=(15, 15), maxLevel=2, criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
 
 
 class VideoType(Enum):
@@ -332,6 +343,76 @@ def get_landmarks_from_succeeding_frames(video_frames, display_steps):
     return None, 0, 0
 
 
+def get_landmarks_from_succeeding_frames_with_index(video_frames, display_steps):
+    """Attempt to detect landmarks in succeeding frames if the first frame fails.
+
+    Args:
+        video_frames (list): List of video frames.
+        display_steps (bool): Whether to display intermediate steps.
+
+    Returns:
+        list: Detected landmarks from the succeeding frames or None if not found.
+    """
+    for frame_index, frame in enumerate(video_frames):
+        landmarks, height, width = detect_landmarks(frame, display_steps)
+        if landmarks is None:
+            continue
+        else:
+            return landmarks, frame_index
+    return None, -1
+
+
+def display_nose_landmarks(frame, landmarks, nose_indices, show_indices=False):
+    """Display selected nose landmarks on the original frame.
+
+    Args:
+        frame (ndarray): Original BGR frame.
+        landmarks (list): MediaPipe landmarks as (x, y) coordinates.
+        nose_indices (list): Landmark indices corresponding to the nose region.
+        show_indices (bool): If True, writes landmark index beside each point.
+    """
+    frame_copy = frame.copy()
+
+    for idx in nose_indices:
+        x, y = landmarks[idx]
+
+        cv2.circle(frame_copy, (x, y), radius=3, color=(0, 255, 0), thickness=-1)
+
+        if show_indices:
+            cv2.putText(frame_copy, str(idx), (x + 3, y - 3), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 255), 1,
+                        cv2.LINE_AA)
+    display_image("Nose Landmarks", frame_copy)
+
+
+def get_lagrangian_points_for_lk(landmarks, lagrangian_indices, frame_shape):
+    """Convert selected MediaPipe landmarks into Lucas-Kanade input points.
+
+    Args:
+        landmarks (list): List of facial landmarks as (x, y) pixel coordinates.
+        lagrangian_indices (list): Landmark indices to be tracked.
+        frame_shape (tuple): Shape of the frame, usually frame.shape.
+
+    Returns:
+        ndarray or None: Points with shape N x 1 x 2 and dtype np.float32.
+    """
+    frame_height, frame_width = frame_shape[:2]
+    points = []
+    for idx in lagrangian_indices:
+        if idx >= len(landmarks):
+            continue
+
+        x, y = landmarks[idx]
+
+        if 0 <= x < frame_width and 0 <= y < frame_height:
+            points.append([x, y])
+
+    if len(points) < MIN_LAGRANGIAN_POINTS:
+        return None
+    points = np.array(points, dtype=np.float32)
+    points = points.reshape(-1, 1, 2)
+    return points
+
+
 def skin_ratio_in_roi_bgr(roi_bgr):
     """Compute the fraction of skin-like pixels in a BGR ROI.
 
@@ -426,12 +507,134 @@ def get_temporal_signals_from_video(video_frames, block_size=16, display_steps=F
         masked_frame = apply_mask(frame, hull, display_steps)
         masked_face_no_eyes_lips = remove_eye_and_lip_regions(masked_frame, landmarks, display_steps)
         cropped_face = crop_facial_region(masked_face_no_eyes_lips, hull, display_steps)
-        rois_retained_with_only_skin_regions = retain_rois_with_only_skin_region(cropped_face, block_size, 0.85)
-        mean_pooled_image = mean_pool_blocks(rois_retained_with_only_skin_regions, block_size, display_steps)
+        if USE_SKIN_SEGMENTATION:
+            rois_retained_with_only_skin_regions = retain_rois_with_only_skin_region(cropped_face, block_size, 0.85)
+            mean_pooled_image = mean_pool_blocks(rois_retained_with_only_skin_regions, block_size, display_steps)
+        else:
+            mean_pooled_image = mean_pool_blocks(cropped_face, block_size, display_steps)
         average_pixel_values = rearrange(mean_pooled_image, 'h w c -> (h w) c')
         signals.append(average_pixel_values)
 
     return signals
+
+
+def get_lagrangian_temporal_signals_from_video(video_frames, display_steps=False):
+    """Process the input video frames for Lagrangian respiratory signal extraction.
+
+    Args:
+        video_frames (list or ndarray): List of frames from the video.
+        display_steps (bool): Whether to display intermediate processing steps.
+
+    Returns:
+        ndarray or None: Lagrangian motion trajectories from selected facial points.
+    """
+    frame_idx = 0
+
+    # Choose points for Lagrangian tracking
+    if INCLUDE_CHEEK_LMS_FOR_LAGRANGIAN:
+        lagrangian_indices = mp_nose_indices + mp_right_cheeks + mp_left_cheeks
+    else:
+        lagrangian_indices = mp_nose_indices
+
+    # Try detecting landmarks in the first frame
+    landmarks, _, _ = detect_landmarks(video_frames[0], display_steps)
+
+    # If first-frame detection fails, try succeeding frames
+    if landmarks is None:
+        print("No landmarks detected for first frame. Attempting to detect landmark for succeeding frames.")
+
+        landmarks, frame_idx = get_landmarks_from_succeeding_frames_with_index(
+            video_frames,
+            display_steps
+        )
+
+    # If no landmarks are detected anywhere, skip this clip
+    if landmarks is None:
+        print("No landmarks detected for the clip.")
+        return None
+
+    # If landmarks are detected too late, skip this clip
+    if frame_idx > MAX_LANDMARK_START_FRAME:
+        print("No landmarks detected for the clip within the first 10 frames. Skipping the video.")
+        return None
+
+    if display_steps:
+        display_nose_landmarks(video_frames[frame_idx], landmarks, lagrangian_indices)
+
+    # Convert selected landmarks to Lucas-Kanade input format
+    initial_points = get_lagrangian_points_for_lk(
+        landmarks=landmarks,
+        lagrangian_indices=lagrangian_indices,
+        frame_shape=video_frames[frame_idx].shape
+    )
+
+    if initial_points is None:
+        print("Too few valid Lagrangian landmark points. Skipping the clip.")
+        return None
+
+    # Use the frame where landmarks were successfully detected as the tracking start frame.
+    # If landmarks were detected in the first frame, frame_idx = 0.
+    # If fallback was used, frame_idx may be a later frame.
+    start_frame = video_frames[frame_idx]
+    start_gray = cv2.cvtColor(start_frame, cv2.COLOR_BGR2GRAY)
+
+    prev_gray = start_gray
+    prev_points = initial_points
+
+    # Extract the initial y-coordinate of each tracked point.
+    initial_y = initial_points[:, 0, 1].copy()
+
+    y_trajectories = []
+
+    # Initialize each trajectory with its starting y-position.
+    # If tracking starts from frame 0, each trajectory starts with one value.
+    # If tracking starts from a later frame, fill earlier frames with the initial y-value.
+    for y in initial_y:
+        y_trajectories.append([y] * (frame_idx + 1))
+
+    for current_frame in video_frames[frame_idx + 1:]:
+        current_gray = cv2.cvtColor(current_frame, cv2.COLOR_BGR2GRAY)
+
+        current_points, status, _ = cv2.calcOpticalFlowPyrLK(prev_gray, current_gray,
+                                                             prev_points, None, **LK_PARAMS)
+
+        if current_points is None or status is None:
+            print("Lucas-Kanade tracking failed.")
+            return None
+
+        status = status.reshape(-1).astype(bool)
+
+        # If too few points survive tracking, the motion signal is unreliable.
+        if np.sum(status) < MIN_LAGRANGIAN_POINTS:
+            print("Too few points tracked successfully. Skipping the clip.")
+            return None
+
+        current_points = current_points[status]
+
+        # Remove trajectories corresponding to points that failed tracking.
+        y_trajectories = [
+            trajectory for trajectory, is_valid in zip(y_trajectories, status)
+            if is_valid
+        ]
+
+        for trajectory, point in zip(y_trajectories, current_points):
+            y = point[0, 1]
+            trajectory.append(y)
+
+        prev_gray = current_gray
+        prev_points = current_points.reshape(-1, 1, 2)
+
+    y_trajectories = np.array(y_trajectories, dtype=np.float32)
+
+    # Final safety check. If too few trajectories remain, skip the clip.
+    if y_trajectories.shape[0] < MIN_LAGRANGIAN_POINTS:
+        print("Too few final Lagrangian trajectories. Skipping the clip.")
+        return None
+
+    # Convert absolute y-coordinates to vertical displacements.
+    # For each trajectory, subtract its own first y-coordinate.
+    vertical_displacement_trajectories = (y_trajectories - y_trajectories[:, [0]])
+    return vertical_displacement_trajectories
 
 
 def compute_temporal_signals_non_overlapping_clips(video, destination_path, FPS=35., skip_seconds=10, clip_seconds=10,
@@ -468,6 +671,97 @@ def compute_temporal_signals_non_overlapping_clips(video, destination_path, FPS=
             else:
                 save_temporal_signal(temporal_signal, clip_number, video_info, physiological_parameter,
                                      destination_path, FPS)
+
+
+def compute_lagrangian_signals_non_overlapping_clips(video, destination_path, FPS=35., skip_seconds=10, clip_seconds=10,
+                                                     video_info=None, physiological_parameter="hr",
+                                                     display_steps=False):
+    """Process non-overlapping clips from the given video to obtain motion signals,
+    skipping specified seconds at the start and end.
+
+    Args:
+        video (list): List of frames extracted from the video.
+        destination_path (string): The path where extracted signals is to stored
+        FPS (float/int): Frames per second of the video (default is 35).
+        skip_seconds (float): Number of seconds to skip at the start and end of the video (default is 10).
+        clip_seconds (int): Duration in seconds of each clip to be processed (default is 10).
+        video_info (dict): Metadata about the video for saving purposes.
+        physiological_parameter (string): Type of physiological parameter to be extracted ("hr" or "rr")
+        display_steps (bool): Whether to display intermediate processing steps.
+    """
+    assert physiological_parameter in ["hr", "rr"], "physiological_parameter must be either 'hr', or 'rr'"
+
+    skip_frame_count = math.floor(FPS * skip_seconds)
+    clip_frame_count = math.floor(FPS * clip_seconds)
+
+    start_frame = skip_frame_count
+    end_frame = len(video) - skip_frame_count
+
+    for clip_number, i in enumerate(range(start_frame, end_frame, clip_frame_count)):
+        clip = video[i:i + clip_frame_count]
+
+        if len(clip) >= clip_frame_count:
+            temporal_signal = get_lagrangian_temporal_signals_from_video(clip, display_steps=display_steps)
+            if temporal_signal is None:
+                print(f"Issue with temporal signal {video_info}, clip # {clip_number}")
+            else:
+                save_lagrangian_temporal_signal(temporal_signal, clip_number, video_info, physiological_parameter,
+                                                destination_path, FPS)
+
+
+def save_lagrangian_temporal_signal(temporal_signal, clip_number, video_info, physiological_parameter,
+                                    destination_path, FPS):
+    """Save Lagrangian vertical motion trajectories to disk.
+
+        Args:
+            temporal_signal (ndarray): Lagrangian trajectories with shape points x frames.
+            clip_number (int): Clip number being processed.
+            video_info (dict): Metadata for naming directories.
+            physiological_parameter (str): "hr" or "rr", used to choose filtering band.
+            destination_path (str): Root output directory.
+            FPS (float): Original video FPS.
+        """
+    assert physiological_parameter in ["hr", "rr"], "physiological_parameter must be either 'hr' or 'rr'"
+
+    temporal_signal = np.asarray(temporal_signal)
+
+    if temporal_signal.ndim != 2:
+        print(f"Invalid Lagrangian signal shape: {temporal_signal.shape}")
+        return
+
+    if temporal_signal.shape[0] < MIN_LAGRANGIAN_POINTS:
+        print(f"Too few Lagrangian trajectories: {temporal_signal.shape[0]}")
+        return
+
+    lowcut, highcut = get_lowcut_highcut_frequencies_based_on_physiological_parameter(physiological_parameter)
+
+    temporal_signal_filtered = detrend(butter_bandpass_filter(temporal_signal, lowcut, highcut, fs=FPS), axis=1)
+
+    subject = video_info["subject"]
+    label = video_info["label"]
+    clip_seconds = video_info["clip_seconds"]
+    split = video_info["split"]
+    session_num = video_info["session_num"]
+
+    if SPLIT_USED and split is not None:
+        folder_structure = os.path.join(destination_path, "rppg_signals_lagrangian", physiological_parameter,
+                                        f"{clip_seconds:03}s", split, label, subject)
+    else:
+        folder_structure = os.path.join(destination_path, "rppg_signals_lagrangian", physiological_parameter,
+                                        f"{clip_seconds:03}s", label, subject)
+    os.makedirs(folder_structure, exist_ok=True)
+
+    if session_num < 0:
+        file_name = f"{clip_number:02}.npy"
+    else:
+        file_name = f"{session_num:02}_{clip_number:02}.npy"
+
+    # Interpolate to DEFAULT_FPS for consistency with Eulerian signals.
+    t_old = np.linspace(0, clip_seconds, temporal_signal_filtered.shape[1])
+    t_new = np.linspace(0, clip_seconds, int(clip_seconds * DEFAULT_FPS))
+
+    interpolated_signal = interp1d(t_old, temporal_signal_filtered, kind="cubic", axis=1)(t_new)
+    np.save(os.path.join(folder_structure, file_name), interpolated_signal)
 
 
 def save_temporal_signal(temporal_signal, clip_number, video_info, physiological_parameter, destination_path,
@@ -521,7 +815,7 @@ def save_temporal_signal(temporal_signal, clip_number, video_info, physiological
     session_num = video_info["session_num"]
 
     # Define the directory structure for saving the signals
-    if split is not None:
+    if SPLIT_USED and split is not None:
         folder_structure = os.path.join(destination_path, "rppg_signals", physiological_parameter,
                                         f"{clip_seconds:03}s", f"{block_size}bs", split, label, subject)
     else:
@@ -667,6 +961,31 @@ def extract_eulerian_signals():
                                                                    display_steps=DISPLAY_INTERMEDIATE_OUTPUTS)
 
 
+def extract_lagrangian_signals():
+    physiological_parameter_list = ['hr', 'rr']
+    for video_file_path in tqdm(video_file_paths):
+        subject, video_type, split, session_num = get_details_from_video_path(video_file_path)
+        if video_type.name == VideoType.REST.name:
+            continue
+        frames = extract_frames_from_video(video_file_path)
+        for clip_seconds in clip_seconds_list:
+            fps = len(frames) / time_duration_for_video_type[video_type]  # CHANGE HERE
+            video_info = {
+                "subject": subject,
+                "label": video_type.name,
+                "clip_seconds": clip_seconds,
+                "split": split,
+                "session_num": session_num,
+            }
+            for physiological_parameter in physiological_parameter_list:
+                compute_lagrangian_signals_non_overlapping_clips(frames, destination_path, fps,
+                                                                 skip_seconds=SKIP_SECONDS,
+                                                                 clip_seconds=clip_seconds,
+                                                                 video_info=video_info,
+                                                                 physiological_parameter=physiological_parameter,
+                                                                 display_steps=DISPLAY_INTERMEDIATE_OUTPUTS)
+
+
 # def extract_visual_features():
 #     for openface_feature_file_path in tqdm(openface_feature_file_paths):
 #         subject, video_type, split, session_num = get_details_from_visual_feature_path(openface_feature_file_path)
@@ -791,4 +1110,5 @@ if USE_ADAPTIVE_BLOCK_SIZE:
     assert len(block_sizes) == 1
 
 extract_eulerian_signals()
+extract_lagrangian_signals()
 # extract_visual_features()
