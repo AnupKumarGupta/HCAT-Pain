@@ -18,7 +18,7 @@ This document provides step-by-step instructions for setting up the development 
   - [6.3 Fix OpenCV permission issues](#63-fix-opencv-permission-issues)
   - [6.4 Fix dlib download issue](#64-fix-dlib-download-issue)
   - [6.5 Verify OpenFace installation](#65-verify-openface-installation)
-
+- [7. Install libraries in requirements.txt](#7-install-libraries-in-requirementstxt)
 ---
 
 ## 1. Tested environment
@@ -233,3 +233,21 @@ You can also check it from inside the OpenFace directory:
 ```bash
 ls build/bin/FeatureExtraction
 ```
+
+---
+
+## 7. Install libraries in requirements.txt
+
+After installing PyTorch and OpenFace, install the remaining Python libraries from `requirements.txt`.
+
+Run the following command from the repository root:
+
+```bash
+pip install -r requirements.txt
+```
+
+> [!NOTE]
+> PyTorch is installed separately in Section 4 because the correct PyTorch build depends on the CUDA version available on the system.
+
+
+> Please refer to the [EXECUTE.md](EXECUTE.md) file for data extraction, preprocessing, and running the code.
