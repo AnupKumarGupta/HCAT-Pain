@@ -5,6 +5,7 @@ from glob import glob
 import cv2
 import numpy as np
 import mediapipe as mp
+import pandas as pd
 from einops import rearrange, reduce
 from matplotlib import pyplot as plt
 from natsort import natsorted
@@ -15,7 +16,8 @@ from tqdm import tqdm
 from scipy.signal import detrend
 
 from utils import (SUBJECT_LIST_VALIDATION, SPLIT_USED,
-                   get_lowcut_highcut_frequencies_based_on_physiological_parameter, butter_bandpass_filter)
+                   get_lowcut_highcut_frequencies_based_on_physiological_parameter, butter_bandpass_filter,
+                   openface_indices, epsilon)
 
 # Initialize MediaPipe Face Mesh model
 mp_face_mesh = mp.solutions.face_mesh
@@ -836,33 +838,36 @@ def get_details_from_video_path(video_path):
     return subject_, video_type_, split_, int(session_num_)
 
 
-# def get_details_from_visual_feature_path(csv_file_path):
-#     csv_name = os.path.basename(csv_file_path).split('.')[0].lower()
-#     subject_ = csv_name.split('_')[0]
-#
-#     if "baseline" in csv_name:
-#         session_num_ = -1  # No separate sessions were done for baseline
-#         video_type_ = VideoType.BASELINE
-#     elif "pain" in csv_name:
-#         _, _, video_type_, session_num_ = csv_name.split('_')
-#         if video_type_ == "high":
-#             video_type_ = VideoType.PAIN_HIGH
-#         else:
-#             video_type_ = VideoType.PAIN_LOW
-#     else:  # rest
-#         session_num_ = -1  # Separate sessions were done for rest. However, we do not consider them.
-#         video_type_ = VideoType.REST
-#
-#     if "Train" in csv_file_path:
-#         split_ = "Train"
-#     elif "Validation" in csv_file_path:
-#         split_ = "Validation"
-#     elif "Test" in csv_file_path:
-#         split_ = "Test"
-#     else:
-#         split_ = None
-#
-#     return subject_, video_type_, split_, int(session_num_)
+def get_details_from_visual_feature_path(csv_file_path):
+    csv_name = os.path.basename(csv_file_path).split('.')[0].lower()
+    subject_ = csv_name.split('_')[0]
+
+    if "baseline" in csv_name:
+        session_num_ = -1  # No separate sessions were done for baseline
+        video_type_ = VideoType.BASELINE
+    elif "pain" in csv_name:
+        _, _, video_type_, session_num_ = csv_name.split('_')
+        if video_type_ == "high":
+            video_type_ = VideoType.PAIN_HIGH
+        else:
+            video_type_ = VideoType.PAIN_LOW
+    else:  # rest
+        session_num_ = -1  # Separate sessions were done for rest. However, we do not consider them.
+        video_type_ = VideoType.REST
+
+    if SPLIT_USED:
+        if "Train" in csv_file_path:
+            split_ = "Train"
+        elif "Validation" in csv_file_path:
+            split_ = "Validation"
+        elif "Test" in csv_file_path:
+            split_ = "Test"
+        else:
+            split_ = None
+            raise ValueError(f"SPLIT_USED=True, but could not infer split from OpenFace path: {csv_file_path}")
+    else:
+        split_ = None
+    return subject_, video_type_, split_, int(session_num_)
 
 
 # def get_details_from_rppg_path(rppg_file_path):
@@ -946,112 +951,114 @@ def extract_lagrangian_signals():
                                                                  display_steps=DISPLAY_INTERMEDIATE_OUTPUTS)
 
 
-# def extract_visual_features():
-#     for openface_feature_file_path in tqdm(openface_feature_file_paths):
-#         subject, video_type, split, session_num = get_details_from_visual_feature_path(openface_feature_file_path)
-#         if video_type.name == VideoType.REST.name:
-#             continue
-#         df_raw = pd.read_csv(openface_feature_file_path)
-#         FPS = df_raw.shape[0] / time_duration_for_video_type[video_type]
-#         ROWS_TO_SKIP = int(SKIP_SECONDS * FPS)
-#         df = df_raw.iloc[ROWS_TO_SKIP:-ROWS_TO_SKIP].reset_index(drop=True)
-#         length = df.shape[0]
-#
-#         for clip_seconds in clip_seconds_list:
-#             clip_frame_count = math.floor(DEFAULT_FPS * clip_seconds)
-#             clip_count = length // clip_frame_count
-#             for clip_number in range(clip_count):
-#                 df_clipped = (df.iloc[int(clip_frame_count * clip_number): int(clip_frame_count * (clip_number + 1))].
-#                               reset_index(drop=True))
-#
-#                 clip_info = {
-#                     "subject": subject,
-#                     "label": video_type.name,
-#                     "clip_seconds": clip_seconds,
-#                     "split": split,
-#                     "session_num": session_num,
-#                     "clip_number": clip_number
-#                 }
-#
-#                 save_visual_features(clip_info, df_clipped)
-#
-#
-# def save_visual_features(clip_info, df_clipped):
-#     AU_classification = df_clipped.iloc[:, openface_indices.AU_classification]
-#     AU_regression = df_clipped.iloc[:, openface_indices.AU_regression]
-#     eye_landmark_left_X_3D = df_clipped.iloc[:, openface_indices.eye_landmark_left_X_3D]
-#     eye_landmark_left_Y_3D = df_clipped.iloc[:, openface_indices.eye_landmark_left_Y_3D]
-#     eye_landmark_left_Z_3D = df_clipped.iloc[:, openface_indices.eye_landmark_left_Z_3D]
-#     eye_landmark_right_X_3D = df_clipped.iloc[:, openface_indices.eye_landmark_right_X_3D]
-#     eye_landmark_right_Y_3D = df_clipped.iloc[:, openface_indices.eye_landmark_right_Y_3D]
-#     eye_landmark_right_Z_3D = df_clipped.iloc[:, openface_indices.eye_landmark_right_Z_3D]
-#     eye_landmark_left_x = df_clipped.iloc[:, openface_indices.eye_landmark_left_x]
-#     eye_landmark_left_y = df_clipped.iloc[:, openface_indices.eye_landmark_left_y]
-#     eye_landmark_right_x = df_clipped.iloc[:, openface_indices.eye_landmark_right_x]
-#     eye_landmark_right_y = df_clipped.iloc[:, openface_indices.eye_landmark_right_y]
-#     gaze_angles = df_clipped.iloc[:, openface_indices.gaze_angles]
-#     gaze_coordinates_left = df_clipped.iloc[:, openface_indices.gaze_coordinates_left]
-#     gaze_coordinates_right = df_clipped.iloc[:, openface_indices.gaze_coordinates_right]
-#     pose_location = df_clipped.iloc[:, openface_indices.pose_location]
-#     pose_rotation = df_clipped.iloc[:, openface_indices.pose_rotation]
-#     ###########
-#     # PERCLOS #
-#     ###########
-#     PERCLOS_left_h1 = df_clipped.iloc[:, openface_indices.PERCLOS_left_h1].copy().set_axis(["x", "y"], axis=1)
-#     PERCLOS_left_h2 = df_clipped.iloc[:, openface_indices.PERCLOS_left_h2].copy().set_axis(["x", "y"], axis=1)
-#     PERCLOS_left_v1 = df_clipped.iloc[:, openface_indices.PERCLOS_left_v1].copy().set_axis(["x", "y"], axis=1)
-#     PERCLOS_left_v2 = df_clipped.iloc[:, openface_indices.PERCLOS_left_v2].copy().set_axis(["x", "y"], axis=1)
-#     PERCLOS_right_h1 = df_clipped.iloc[:, openface_indices.PERCLOS_right_h1].copy().set_axis(["x", "y"], axis=1)
-#     PERCLOS_right_h2 = df_clipped.iloc[:, openface_indices.PERCLOS_right_h2].copy().set_axis(["x", "y"], axis=1)
-#     PERCLOS_right_v1 = df_clipped.iloc[:, openface_indices.PERCLOS_right_v1].copy().set_axis(["x", "y"], axis=1)
-#     PERCLOS_right_v2 = df_clipped.iloc[:, openface_indices.PERCLOS_right_v2].copy().set_axis(["x", "y"], axis=1)
-#     # EAR - Eye Aspect Ratio
-#     EAR_values_left = (np.linalg.norm(PERCLOS_left_v1.values - PERCLOS_left_v2.values, axis=1) /
-#                        (np.linalg.norm(PERCLOS_left_h1.values - PERCLOS_left_h2.values, axis=1) + epsilon))
-#     EAR_values_right = (np.linalg.norm(PERCLOS_right_v1.values - PERCLOS_right_v2.values, axis=1) /
-#                         (np.linalg.norm(PERCLOS_right_h1.values - PERCLOS_right_h2.values, axis=1) + epsilon))
-#     subject = clip_info["subject"]
-#     label = clip_info["label"]
-#     clip_seconds = clip_info["clip_seconds"]
-#     split = clip_info["split"]
-#     session_num = clip_info["session_num"]
-#     clip_number = clip_info["clip_number"]
-#
-#     # Define the directory structure for saving the signals
-#     if split is not None:
-#         ## This will be triggered if the output folder of 'extract_openface_features.py' is stored split-wise
-#         folder_structure = os.path.join(destination_path, "visual_features", f"{clip_seconds:03}s", split, label,
-#                                         subject)
-#     else:
-#         ## This will be triggered if the output folder of 'extract_openface_features.py' is stored at same folder level
-#         folder_structure = os.path.join(destination_path, "visual_features", f"{clip_seconds:03}s", label, subject)
-#
-#     if session_num < 0:
-#         file_name = f"{clip_number:02}.npy"
-#     else:
-#         file_name = f"{session_num:02}_{clip_number:02}.npy"
-#
-#     name_feature_pair = {
-#         "AU_classification": AU_classification,
-#         "AU_regression": AU_regression,
-#         "eye_landmark_3D": pd.concat([eye_landmark_left_X_3D, eye_landmark_left_Y_3D, eye_landmark_left_Z_3D,
-#                                       eye_landmark_right_X_3D, eye_landmark_right_Y_3D, eye_landmark_right_Z_3D], axis=1),
-#         "eye_landmark": pd.concat([eye_landmark_left_x, eye_landmark_left_y,
-#                                    eye_landmark_right_x, eye_landmark_right_y], axis=1),
-#         "gaze": pd.concat([gaze_coordinates_left, gaze_coordinates_right, gaze_angles], axis=1),
-#         "pose": pd.concat([pose_location, pose_rotation], axis=1),
-#         "EAR_values": np.concatenate((EAR_values_left[:, np.newaxis], EAR_values_right[:, np.newaxis]), axis=1)
-#     }
-#     for sub_folder, _ in name_feature_pair.items():
-#         os.makedirs(os.path.join(folder_structure, sub_folder), exist_ok=True)
-#
-#     for name, data in name_feature_pair.items():
-#         output_path = os.path.join(folder_structure, name, file_name)
-#
-#         if isinstance(data, pd.DataFrame):
-#             np.save(output_path, data.values)
-#         else:
-#             np.save(output_path, data)
+def extract_visual_features():
+    for openface_feature_file_path in tqdm(openface_feature_file_paths):
+        subject, video_type, split, session_num = get_details_from_visual_feature_path(openface_feature_file_path)
+        if video_type.name == VideoType.REST.name:  #TODO: This needs to be changed for other datasets
+            continue
+        df_raw = pd.read_csv(openface_feature_file_path)
+        FPS = df_raw.shape[0] / time_duration_for_video_type[video_type]
+        ROWS_TO_SKIP = int(SKIP_SECONDS * FPS)
+        df = df_raw.iloc[ROWS_TO_SKIP:-ROWS_TO_SKIP].reset_index(drop=True)
+        length = df.shape[0]
+
+        for clip_seconds in clip_seconds_list:
+            clip_frame_count = math.floor(DEFAULT_FPS * clip_seconds)
+            clip_count = length // clip_frame_count
+            for clip_number in range(clip_count):
+                df_clipped = (df.iloc[int(clip_frame_count * clip_number): int(clip_frame_count * (clip_number + 1))].
+                              reset_index(drop=True))
+
+                clip_info = {
+                    "subject": subject,
+                    "label": video_type.name,
+                    "clip_seconds": clip_seconds,
+                    "split": split,
+                    "session_num": session_num,
+                    "clip_number": clip_number
+                }
+
+                save_visual_features(clip_info, df_clipped)
+
+
+def save_visual_features(clip_info, df_clipped):
+    AU_classification = df_clipped.iloc[:, openface_indices.AU_classification]
+    AU_regression = df_clipped.iloc[:, openface_indices.AU_regression]
+    eye_landmark_left_X_3D = df_clipped.iloc[:, openface_indices.eye_landmark_left_X_3D]
+    eye_landmark_left_Y_3D = df_clipped.iloc[:, openface_indices.eye_landmark_left_Y_3D]
+    eye_landmark_left_Z_3D = df_clipped.iloc[:, openface_indices.eye_landmark_left_Z_3D]
+    eye_landmark_right_X_3D = df_clipped.iloc[:, openface_indices.eye_landmark_right_X_3D]
+    eye_landmark_right_Y_3D = df_clipped.iloc[:, openface_indices.eye_landmark_right_Y_3D]
+    eye_landmark_right_Z_3D = df_clipped.iloc[:, openface_indices.eye_landmark_right_Z_3D]
+    eye_landmark_left_x = df_clipped.iloc[:, openface_indices.eye_landmark_left_x]
+    eye_landmark_left_y = df_clipped.iloc[:, openface_indices.eye_landmark_left_y]
+    eye_landmark_right_x = df_clipped.iloc[:, openface_indices.eye_landmark_right_x]
+    eye_landmark_right_y = df_clipped.iloc[:, openface_indices.eye_landmark_right_y]
+    gaze_angles = df_clipped.iloc[:, openface_indices.gaze_angles]
+    gaze_coordinates_left = df_clipped.iloc[:, openface_indices.gaze_coordinates_left]
+    gaze_coordinates_right = df_clipped.iloc[:, openface_indices.gaze_coordinates_right]
+    pose_location = df_clipped.iloc[:, openface_indices.pose_location]
+    pose_rotation = df_clipped.iloc[:, openface_indices.pose_rotation]
+    ###########
+    # PERCLOS #
+    ###########
+    PERCLOS_left_h1 = df_clipped.iloc[:, openface_indices.PERCLOS_left_h1].copy().set_axis(["x", "y"], axis=1)
+    PERCLOS_left_h2 = df_clipped.iloc[:, openface_indices.PERCLOS_left_h2].copy().set_axis(["x", "y"], axis=1)
+    PERCLOS_left_v1 = df_clipped.iloc[:, openface_indices.PERCLOS_left_v1].copy().set_axis(["x", "y"], axis=1)
+    PERCLOS_left_v2 = df_clipped.iloc[:, openface_indices.PERCLOS_left_v2].copy().set_axis(["x", "y"], axis=1)
+    PERCLOS_right_h1 = df_clipped.iloc[:, openface_indices.PERCLOS_right_h1].copy().set_axis(["x", "y"], axis=1)
+    PERCLOS_right_h2 = df_clipped.iloc[:, openface_indices.PERCLOS_right_h2].copy().set_axis(["x", "y"], axis=1)
+    PERCLOS_right_v1 = df_clipped.iloc[:, openface_indices.PERCLOS_right_v1].copy().set_axis(["x", "y"], axis=1)
+    PERCLOS_right_v2 = df_clipped.iloc[:, openface_indices.PERCLOS_right_v2].copy().set_axis(["x", "y"], axis=1)
+    # EAR - Eye Aspect Ratio
+    EAR_values_left = (np.linalg.norm(PERCLOS_left_v1.values - PERCLOS_left_v2.values, axis=1) /
+                       (np.linalg.norm(PERCLOS_left_h1.values - PERCLOS_left_h2.values, axis=1) + epsilon))
+    EAR_values_right = (np.linalg.norm(PERCLOS_right_v1.values - PERCLOS_right_v2.values, axis=1) /
+                        (np.linalg.norm(PERCLOS_right_h1.values - PERCLOS_right_h2.values, axis=1) + epsilon))
+    subject = clip_info["subject"]
+    label = clip_info["label"]
+    clip_seconds = clip_info["clip_seconds"]
+    split = clip_info["split"]
+    session_num = clip_info["session_num"]
+    clip_number = clip_info["clip_number"]
+
+    # Define the directory structure for saving the signals
+    if SPLIT_USED and split is not None:
+        ## This will be triggered if the output folder of 'extract_openface_features.py' is stored split-wise
+        folder_structure = os.path.join(destination_path, "visual_features", f"{clip_seconds:03}s", split, label,
+                                        subject)
+    else:
+        ## This will be triggered if the output folder of 'extract_openface_features.py' is stored at same folder level
+        folder_structure = os.path.join(destination_path, "visual_features", f"{clip_seconds:03}s", label, subject)
+
+    if session_num < 0:
+        file_name = f"{clip_number:02}.npy"
+    else:
+        file_name = f"{session_num:02}_{clip_number:02}.npy"
+
+    name_feature_pair = {
+        "AU_classification": AU_classification,
+        "AU_regression": (AU_regression.astype(float) / 5.0).clip(0, 1),
+        "AU_regression_raw": AU_regression,
+        "eye_landmark_3D": pd.concat([eye_landmark_left_X_3D, eye_landmark_left_Y_3D, eye_landmark_left_Z_3D,
+                                      eye_landmark_right_X_3D, eye_landmark_right_Y_3D, eye_landmark_right_Z_3D],
+                                     axis=1),
+        "eye_landmark": pd.concat([eye_landmark_left_x, eye_landmark_left_y,
+                                   eye_landmark_right_x, eye_landmark_right_y], axis=1),
+        "gaze": pd.concat([gaze_coordinates_left, gaze_coordinates_right, gaze_angles], axis=1),
+        "pose": pd.concat([pose_location, pose_rotation], axis=1),
+        "EAR_values": np.concatenate((EAR_values_left[:, np.newaxis], EAR_values_right[:, np.newaxis]), axis=1)
+    }
+    for sub_folder, _ in name_feature_pair.items():
+        os.makedirs(os.path.join(folder_structure, sub_folder), exist_ok=True)
+
+    for name, data in name_feature_pair.items():
+        output_path = os.path.join(folder_structure, name, file_name)
+
+        if isinstance(data, pd.DataFrame):
+            np.save(output_path, data.values)
+        else:
+            np.save(output_path, data)
 
 
 base_path = "/media/user/Projects/Datasets/AI4Pain/2024"
@@ -1061,7 +1068,10 @@ destination_path = os.path.join(base_path, "Extracted_Output")
 
 video_file_paths = natsorted(glob(os.path.join(video_source_path_train, "*.mp4")) +
                              glob(os.path.join(video_source_path_valid, "*.mp4")))
-openface_feature_file_paths = natsorted(glob(os.path.join(f"{base_path}/Extracted_OF_5/*/*", "*.csv")))
+if SPLIT_USED:
+    openface_feature_file_paths = natsorted(glob(os.path.join(f"{base_path}/Extracted_OF_5/*/*", "*.csv")))
+else:
+    openface_feature_file_paths = natsorted(glob(os.path.join(f"{base_path}/Extracted_OF_5/*", "*.csv")))
 
 clip_seconds_list = [3, 4, 9]
 
@@ -1072,4 +1082,4 @@ if USE_ADAPTIVE_BLOCK_SIZE:
 if __name__ == "__main__":
     extract_eulerian_signals()
     extract_lagrangian_signals()
-    # extract_visual_features()
+    extract_visual_features()
