@@ -5,7 +5,6 @@ from glob import glob
 import cv2
 import numpy as np
 import mediapipe as mp
-import pandas as pd
 from einops import rearrange, reduce
 from matplotlib import pyplot as plt
 from natsort import natsorted
@@ -13,8 +12,10 @@ from enum import Enum
 
 from scipy.interpolate import interp1d
 from tqdm import tqdm
-from scipy.signal import butter, filtfilt, detrend
-from utils import openface_indices, epsilon, SUBJECT_LIST_VALIDATION, SPLIT_USED
+from scipy.signal import detrend
+
+from utils import (SUBJECT_LIST_VALIDATION, SPLIT_USED,
+                   get_lowcut_highcut_frequencies_based_on_physiological_parameter, butter_bandpass_filter)
 
 # Initialize MediaPipe Face Mesh model
 mp_face_mesh = mp.solutions.face_mesh
@@ -196,47 +197,6 @@ def remove_eye_and_lip_regions(cropped_face, landmarks, display_steps=False):
         display_image("Cropped Facial Region with Eyes Removed", cropped_face_with_no_eyes_and_lips)
 
     return cropped_face_with_no_eyes_and_lips
-
-
-def butter_bandpass_filter(data, lowcut=0.7, highcut=4.2, fs=30.0, order=4):
-    """Apply a Butterworth bandpass filter to the input data.
-
-    Args:
-        data (ndarray): Input signal (2D array with shape rois x frames).
-        lowcut (float): Lower cutoff frequency in Hz.
-        highcut (float): Upper cutoff frequency in Hz.
-        fs (float): Sampling frequency in Hz.
-        order (int): The order of the filter.
-
-    Returns:
-        ndarray: Filtered data with the same shape as the input.
-    """
-
-    # Ensure data is 2D: If the input is 1D, convert it to a 2D array with one row.
-    if data.ndim == 1:
-        data = data[np.newaxis, :]
-    nyquist = 0.5 * fs  # Nyquist frequency
-    low = lowcut / nyquist
-    high = highcut / nyquist
-    b, a = butter(order, [low, high], btype='band')
-    return filtfilt(b, a, data, axis=1)
-
-
-def get_lowcut_highcut_frequencies_based_on_physiological_parameter(physiological_parameter):
-    """
-    physiological_parameter (string): Type of physiological parameter to be extracted ("hr" or "rr")
-    """
-    assert physiological_parameter in ["hr", "rr"], "physiological_parameter must be either 'hr', or 'rr'"
-    lowcut = 0
-    highcut = 0
-
-    if physiological_parameter == "hr":
-        lowcut = 0.7  # 0.7
-        highcut = 4.2  # 4.2
-    elif physiological_parameter == "rr":
-        lowcut = 0.083
-        highcut = 0.5
-    return lowcut, highcut
 
 
 def mean_pool_blocks(cropped_face, block_size=16, display_steps=False):
@@ -1109,6 +1069,7 @@ block_sizes = [41]  # Note should only be used if adaptive block size is False
 if USE_ADAPTIVE_BLOCK_SIZE:
     assert len(block_sizes) == 1
 
-extract_eulerian_signals()
-extract_lagrangian_signals()
-# extract_visual_features()
+if __name__ == "__main__":
+    extract_eulerian_signals()
+    extract_lagrangian_signals()
+    # extract_visual_features()

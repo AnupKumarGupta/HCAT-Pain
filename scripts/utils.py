@@ -1,3 +1,6 @@
+import numpy as np
+from scipy.signal import butter, filtfilt
+
 SPLIT_USED = False
 
 SUBJECT_LIST_TRAIN = []
@@ -113,3 +116,44 @@ openface_indices = DotDict({
 })
 
 epsilon = 1e-8
+
+
+def get_lowcut_highcut_frequencies_based_on_physiological_parameter(physiological_parameter):
+    """
+    physiological_parameter (string): Type of physiological parameter to be extracted ("hr" or "rr")
+    """
+    assert physiological_parameter in ["hr", "rr"], "physiological_parameter must be either 'hr', or 'rr'"
+    lowcut = 0
+    highcut = 0
+
+    if physiological_parameter == "hr":
+        lowcut = 0.7  # 0.7
+        highcut = 4.2  # 4.2
+    elif physiological_parameter == "rr":
+        lowcut = 0.083
+        highcut = 0.5
+    return lowcut, highcut
+
+
+def butter_bandpass_filter(data, lowcut=0.7, highcut=4.2, fs=30.0, order=4):
+    """Apply a Butterworth bandpass filter to the input data.
+
+    Args:
+        data (ndarray): Input signal (2D array with shape rois x frames).
+        lowcut (float): Lower cutoff frequency in Hz.
+        highcut (float): Upper cutoff frequency in Hz.
+        fs (float): Sampling frequency in Hz.
+        order (int): The order of the filter.
+
+    Returns:
+        ndarray: Filtered data with the same shape as the input.
+    """
+
+    # Ensure data is 2D: If the input is 1D, convert it to a 2D array with one row.
+    if data.ndim == 1:
+        data = data[np.newaxis, :]
+    nyquist = 0.5 * fs  # Nyquist frequency
+    low = lowcut / nyquist
+    high = highcut / nyquist
+    b, a = butter(order, [low, high], btype='band')
+    return filtfilt(b, a, data, axis=1)
