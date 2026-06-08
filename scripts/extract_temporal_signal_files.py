@@ -870,33 +870,39 @@ def get_details_from_visual_feature_path(csv_file_path):
     return subject_, video_type_, split_, int(session_num_)
 
 
-# def get_details_from_rppg_path(rppg_file_path):
-#     if "Train" in rppg_file_path:
-#         split_ = "Train"
-#     elif "Test" in rppg_file_path:
-#         split_ = "Test"
-#     else:
-#         split_ = "Validation"
-#
-#     file_components = rppg_file_path.lower().split('/')
-#     file_name = os.path.basename(rppg_file_path).split('.')[0].lower()
-#     subject_ = file_components[-3]
-#
-#     if "baseline" == file_components[-4]:
-#         session_num_ = -1  # No separate sessions were done for baseline
-#         clip_num_ = file_name
-#         video_type_ = VideoType.BASELINE
-#     elif "pain" in file_components[-4]:
-#         session_num_, clip_num_ = file_name.split('_')
-#         if "high" in file_components[-4]:
-#             video_type_ = VideoType.PAIN_HIGH
-#         else:
-#             video_type_ = VideoType.PAIN_LOW
-#     else:  # rest
-#         session_num_ = -1  # Separate sessions were done for rest. However, we do not consider them.
-#         clip_num_ = 1
-#         video_type_ = VideoType.REST
-#     return subject_, video_type_, split_, int(session_num_), int(clip_num_)
+def get_details_from_rppg_path(rppg_file_path):
+    if SPLIT_USED:
+        if "Train" in rppg_file_path:
+            split_ = "Train"
+        elif "Test" in rppg_file_path:
+            split_ = "Test"
+        elif "Validation" in rppg_file_path:
+            split_ = "Validation"
+        else:
+            split_ = None
+            raise ValueError(f"SPLIT_USED=True, but could not infer split from rPPG path: {rppg_file_path}")
+    else:
+        split_ = None
+
+    file_components = rppg_file_path.lower().split('/')
+    file_name = os.path.basename(rppg_file_path).split('.')[0].lower()
+    subject_ = file_components[-3]
+
+    if "baseline" == file_components[-4]:
+        session_num_ = -1  # No separate sessions were done for baseline
+        clip_num_ = file_name
+        video_type_ = VideoType.BASELINE
+    elif "pain" in file_components[-4]:
+        session_num_, clip_num_ = file_name.split('_')
+        if "high" in file_components[-4]:
+            video_type_ = VideoType.PAIN_HIGH
+        else:
+            video_type_ = VideoType.PAIN_LOW
+    else:  # rest
+        session_num_ = -1  # Separate sessions were done for rest. However, we do not consider them.
+        clip_num_ = 1
+        video_type_ = VideoType.REST
+    return subject_, video_type_, split_, int(session_num_), int(clip_num_)
 
 
 def extract_eulerian_signals():
